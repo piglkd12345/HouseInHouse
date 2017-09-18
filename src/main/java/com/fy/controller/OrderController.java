@@ -16,7 +16,9 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseBody;
 
+import javax.servlet.http.HttpServletResponse;
 import javax.servlet.http.HttpSession;
+import java.io.*;
 import java.util.Calendar;
 import java.util.Date;
 import java.util.List;
@@ -36,21 +38,20 @@ public class OrderController extends BaseController {
     private UserService userService;
 
     @Autowired
-    HouseInfoService houseInfoService;
-
-
+    private HouseInfoService houseInfoService;
 
 
     //转向订单确认页面
     @RequestMapping("/toCreateOrder")
-    public String toCreateOrder(@RequestParam(required = true) String hhUserId, @RequestParam(required = true) String HouseInfoId, Model model, HttpSession session) {
-//        if (session.getAttribute("User") == null) {
-//            return "redirect:login";
-//        }
+    public String toCreateOrder(@RequestParam(required = true) String hhUserId, @RequestParam(required = true) String hhHouseId, Model model, HttpSession session) {
+        if (session.getAttribute("SessionUser") == null) {
+            return "redirect:login";
+        }
+
         User user = null;
-        //user = userService.findUserById(hhUserId);
+        user = userService.findUserById(hhUserId);
         HouseInfo houseInfo = null;
-        // HouseInfo houseInfo=HouseInfoService.findHouseInfoById(HouseInfoId);
+        houseInfo = orderService.findHouseInfoById(hhHouseId);
 
         //生成订单
         Order order = new Order();
@@ -68,13 +69,28 @@ public class OrderController extends BaseController {
         return "/personal/order/OrderCreate";
     }
 
-    //    @RequestMapping("/personal/order/getImgUrl/${ImgUrl}")
-//    public void getImgUrl(@Validated String ImgUrl , HttpServletResponse response) {
-//        File img=new File(ImgUrl);
-////        FileInputStream is= new FileInputStream(img)
-////       OutputStream os= response.getOutputStream();
-////        os.close();
-//    }
+    @RequestMapping("/personal/order/getImgUrl/${ImgUrl}")
+    public void getImgUrl(@PathVariable String ImgUrl, HttpServletResponse response) {
+        String[] imgUrls=ImgUrl.split(",");
+        for (String imgUrl:imgUrls) {
+            File img = new File(ImgUrl);
+            try {
+                InputStream is=new FileInputStream(img);
+                OutputStream os = response.getOutputStream();
+                byte[] bs=new byte[1024*1024*5];
+                int i = -1;
+                while((i = is.read(bs)) != -1){
+                    os.write(bs,0,i);
+                }
+                os.close();
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
+
+        }
+    }
+
+    //获取手机验证
     @RequestMapping("/getVerfiy/{mobile}")
     @ResponseBody
     public String getVerfy(@PathVariable String mobile, HttpSession session) throws ClientException, InterruptedException {
@@ -97,6 +113,7 @@ public class OrderController extends BaseController {
         return "0"; //发送失败
     }
 
+    //创建订单
     @RequestMapping("/createOrder")
     public String createOrder(String hhOrdersId, String verfyCode, Order order, HttpSession session, Model model) {
         if (verfyCode.equals(session.getAttribute("code"))) {//检查验证码是否匹配
@@ -128,18 +145,89 @@ public class OrderController extends BaseController {
         return "/personal/order/orderList";
     }
 
-    @RequestMapping("/orderList")
-    public String getOrderList(HttpSession session) {
-        Object obj = session.getAttribute("User");
+    //全部订单
+    @RequestMapping("/list")
+    public String getOrderList(HttpSession session, Model model) {
+
+
+        Object obj = session.getAttribute("SessionUser");
+
         if (obj == null) {//如果用户未登入就登入
             return "redirect:login";
         }
-        User user=(User)obj;
-        List<Order> orderList=orderService.findAll(user);
+        User user = (User) obj;
+        List<Order> orderList = orderService.findOrdersById(user);
+        model.addAttribute("orderList", orderList);
 
 
-        return "";
+        return "/personal/order/OrderList";
 
+    }
+
+    @RequestMapping("/findList")
+    public String findOrderList(int status, Model model) {
+        List<Order> orderList = null;
+        if (status != 0) {
+            orderList = orderService.findOrdersByStatus(status);
+
+        } else {
+            orderList = orderService.findAll();
+
+        }
+        model.addAttribute("orderList", orderList);
+        return "/personal/order/OrderListM";
+
+    }
+
+    @RequestMapping("updateStatus/{status}")
+    public String updateStatus(@RequestParam(required = true, value = "hhOrdersId") String[] hhOrdersIds, String hhOrdersRemarks, @PathVariable String status) {
+
+        orderService.updateOrderStatus(hhOrdersIds, status, hhOrdersRemarks);
+        return "redirect:/personal/order/findList？status=" + status;
+    }
+
+
+    // /订单详情
+    @RequestMapping("/toview")
+    public String toView(@RequestParam(required = true) String hhOrdersId, Model model) {
+
+        Order order = orderService.findOrderByOrderId(hhOrdersId);
+        model.addAttribute("order", order);
+        return "/personal/order/OrderView";
+
+    }
+
+    //删除订单
+    @RequestMapping("delete")
+    public String deleteOrders(@RequestParam(required = true, value = "hhOrdersId") String[] hhOrdersIds) {
+        String status = "11";//用户删除订单;  12//管理员删除订单
+        orderService.updateOrderStatus(hhOrdersIds, status, null);
+        return "redirect:/personal/order/list";
+    }
+
+    //取消订单
+    @RequestMapping("/cancel")
+    public String cancelOrder(String hhOrdersId, Model model) {
+        try {
+            orderService.cancelOrder(hhOrdersId);
+        } catch (MegException e) {
+            model.addAttribute("message", e.getMessage());
+            return "/personal/order/toview";
+        }
+        return "redirect:/personal/order/list";
+
+    }
+
+    //退租
+    @RequestMapping("/checkOut")
+    public String checkOutOrder(String hhOrdersId, Model model) {
+        try {
+            orderService.checkOutOrder(hhOrdersId);
+        } catch (MegException e) {
+            model.addAttribute("message", e.getMessage());
+            return "/personal/order/toview";
+        }
+        return "redirect:/personal/order/list";
     }
 
 
